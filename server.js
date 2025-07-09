@@ -83,68 +83,78 @@ app.post('/track', async (req, res) => {
 // Webhook para mensajes de Kommo
 app.post('/webhook/kommo/message', async (req, res) => {
   try {
-    const { 
-      whatsappNumber,
-      messageContent,
-      timestamp,
-      sourceUrl,
-      deviceInfo
-    } = req.body;
+    console.log('Webhook recibido:', req.body);
+    console.log('Query params:', req.query);
+
+    // Validar el kommoId y token
+    const { kommoId, token } = req.query;
+    if (!kommoId || !token) {
+      return res.status(401).json({ error: 'Autenticación requerida' });
+    }
+
+    // Validar que el kommoId coincida con el subdominio de Kommo
+    if (kommoId !== 'mctitan') {
+      return res.status(401).json({ 
+        error: 'Subdominio de Kommo no válido',
+        expected: 'mctitan',
+        received: kommoId
+      });
+    }
+
+    // Extraer información del mensaje de Kommo
+    const whatsappNumber = req.body.contacts?.[0]?.phone || req.body.phone;
+    const messageContent = req.body.message?.text || req.body.text;
+    const timestamp = new Date();
+
+    if (!whatsappNumber || !messageContent) {
+      return res.status(400).json({ 
+        error: 'Datos incompletos', 
+        received: { whatsappNumber, messageContent } 
+      });
+    }
 
     // Buscar leads potenciales en una ventana de tiempo (últimas 24 horas)
     const timeWindow = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
     const potentialLeads = await LeadTracker.find({
       verificationStatus: { $in: ['pendiente', 'primer_mensaje'] },
-      clickTimestamp: { $gte: timeWindow }
+      clickTimestamp: { $gte: timeWindow },
+      whatsappNumber: whatsappNumber.replace(/\D/g, '') // Limpiar número de teléfono
     });
 
-    // Encontrar la mejor coincidencia
-    let bestMatch = null;
-    let highestConfidence = 0;
+    console.log(`Encontrados ${potentialLeads.length} leads potenciales`);
 
-    for (const lead of potentialLeads) {
-      const matchResult = lead.checkMatch({
-        whatsappNumber,
-        messageContent,
-        timestamp,
-        sourceUrl,
-        deviceInfo
-      });
+    if (potentialLeads.length > 0) {
+      const lead = potentialLeads[0]; // Tomamos el más reciente
 
-      if (matchResult.isMatch && matchResult.confidence > highestConfidence) {
-        bestMatch = lead;
-        highestConfidence = matchResult.confidence;
-      }
-    }
-
-    if (bestMatch) {
       // Actualizar estado del mensaje
-      if (bestMatch.verificationStatus === 'pendiente') {
-        bestMatch.verificationStatus = 'primer_mensaje';
-        bestMatch.messageStatus.firstMessage = {
-          timestamp: new Date(timestamp),
-          content: messageContent
+      if (lead.verificationStatus === 'pendiente') {
+        lead.verificationStatus = 'primer_mensaje';
+        lead.messageStatus = {
+          firstMessage: {
+            timestamp: timestamp,
+            content: messageContent
+          }
         };
-      } else if (bestMatch.verificationStatus === 'primer_mensaje') {
+      } else if (lead.verificationStatus === 'primer_mensaje') {
         // Es el segundo mensaje, procedemos con la verificación
-        bestMatch.verificationStatus = 'verificado';
-        bestMatch.messageStatus.secondMessage = {
-          timestamp: new Date(timestamp),
+        lead.verificationStatus = 'verificado';
+        lead.messageStatus.secondMessage = {
+          timestamp: timestamp,
           content: messageContent
         };
-        bestMatch.isVerified = true;
-        bestMatch.verificationDetails = {
+        lead.isVerified = true;
+        lead.verificationDetails = {
           method: 'message_matching',
-          matchedFields: ['whatsapp', 'timeWindow'],
-          confidence: highestConfidence,
+          matchedFields: ['whatsapp'],
+          confidence: 1,
           verifiedAt: new Date()
         };
 
         // Enviar evento a Meta
         try {
           const eventId = `lead_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-          const pixelEndpointUrl = `https://graph.facebook.com/v18.0/${bestMatch.pixel}/events?access_token=${bestMatch.token}`;
+          const pixelEndpointUrl = `https://graph.facebook.com/v18.0/${lead.pixel}/events?access_token=${lead.token}`;
           
           await axios.post(pixelEndpointUrl, {
             data: [{
@@ -152,39 +162,43 @@ app.post('/webhook/kommo/message', async (req, res) => {
               event_id: eventId,
               event_time: Math.floor(Date.now() / 1000),
               action_source: 'website',
-              event_source_url: `https://${bestMatch.subdominio}.${bestMatch.dominio}`,
+              event_source_url: `https://${lead.subdominio}.${lead.dominio}`,
               user_data: {
-                client_ip_address: bestMatch.ip,
-                client_user_agent: bestMatch.deviceInfo.userAgent,
+                client_ip_address: lead.ip,
+                client_user_agent: lead.deviceInfo.userAgent,
                 fbp: req.cookies._fbp,
-                fbc: bestMatch.fbclid ? `fb.1.${Math.floor(Date.now() / 1000)}.${bestMatch.fbclid}` : undefined
+                fbc: lead.fbclid ? `fb.1.${Math.floor(Date.now() / 1000)}.${lead.fbclid}` : undefined
               }
             }]
           });
+          console.log('✅ Evento enviado a Meta');
         } catch (error) {
-          console.error('Error al enviar evento a Meta:', error);
-          // No fallamos la respuesta, solo loggeamos el error
+          console.error('❌ Error al enviar evento a Meta:', error);
         }
       }
 
-      await bestMatch.save();
+      await lead.save();
+      console.log(`✅ Lead actualizado: ${lead.id} - Estado: ${lead.verificationStatus}`);
       
       res.status(200).json({
         mensaje: 'Mensaje procesado y verificado con éxito',
-        status: bestMatch.verificationStatus
+        status: lead.verificationStatus,
+        leadId: lead.id
       });
     } else {
+      console.log('❌ No se encontraron leads para el número:', whatsappNumber);
       res.status(404).json({
         error: 'No se encontró coincidencia para este mensaje',
         detalles: {
           tipo: 'sin_coincidencia',
+          whatsappNumber,
           timestamp: new Date()
         }
       });
     }
 
   } catch (error) {
-    console.error('Error en webhook de mensajes:', error);
+    console.error('❌ Error en webhook de mensajes:', error);
     res.status(500).json({
       error: 'Error interno al procesar mensaje',
       detalles: {
