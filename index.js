@@ -72,7 +72,7 @@ app.post("/guardar", async (req, res) => {
     }
 
     let existente;
-    // 3. Evitar duplicados si el ID ya existe
+    // 3. Evitar duplicados si el ID ya existe estii
     if (kommoId === "cajaadmi01") {
       existente = await RegistroMacleyn.findOne({ id });
     } else if (kommoId === "luchito4637") {
