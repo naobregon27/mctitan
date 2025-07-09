@@ -255,57 +255,15 @@ app.post("/verificacion", async (req, res) => {
     });
     const lead = leadResponse.data;
 
-    // Imprimir todos los campos personalizados para debug
-    console.log("📋 Todos los campos del lead:", JSON.stringify(lead.custom_fields_values, null, 2));
+    const campoMensaje = lead.custom_fields_values?.find(field =>
+      field.field_name === "mensajeenviar"
+    );
+    const mensaje = campoMensaje?.values?.[0]?.value;
 
-    // Función para obtener el mensaje con reintentos
-    const obtenerMensajeConReintentos = async (maxIntentos = 3, esperaMs = 2000) => {
-      for (let intento = 1; intento <= maxIntentos; intento++) {
-        console.log(`🔄 Intento ${intento} de obtener mensaje...`);
-        
-        const leadActual = await axios.get(`https://${kommoId}.kommo.com/api/v4/leads/${leadId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }).then(res => res.data);
+    console.log("📝 Mensaje guardado en el lead (mensajeenviar):", mensaje);
 
-        const campoMensaje = leadActual.custom_fields_values?.find(field =>
-          field.field_name === "mensajeenviar" || 
-          field.field_name === "mensaje" ||
-          field.field_code === "MESSAGE" ||
-          field.field_name?.toLowerCase().includes("mensaje")
-        );
-
-        if (campoMensaje?.values?.[0]?.value) {
-          console.log(`✅ Mensaje encontrado en el intento ${intento}`);
-          return campoMensaje.values[0].value;
-        }
-
-        if (intento < maxIntentos) {
-          console.log(`⏳ Esperando ${esperaMs}ms antes del siguiente intento...`);
-          await new Promise(resolve => setTimeout(resolve, esperaMs));
-        }
-      }
-      return null;
-    };
-
-    const mensaje = await obtenerMensajeConReintentos();
-    console.log("📝 Mensaje final obtenido:", mensaje);
-
-    if (!mensaje) {
-      console.log("❌ No se pudo obtener el mensaje después de varios intentos");
-      return res.status(400).json({
-        error: "Mensaje no encontrado",
-        detalles: {
-          tipo: 'mensaje_no_encontrado',
-          mensaje: "No se pudo obtener el mensaje del lead después de varios intentos",
-          timestamp: new Date()
-        }
-      });
-    }
-
-    const idExtraido = mensaje.match(/\d{13,}/)?.[0];
-    console.log("🧾 ID extraído del mensaje:", idExtraido);
+    const idExtraido = mensaje?.match(/\d{13,}/)?.[0];
+    console.log("🧾 ID extraído del mensaje:", idExtraido); //cambios
 
     if (idExtraido) {
       let Modelo;
