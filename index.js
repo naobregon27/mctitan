@@ -31,7 +31,7 @@ mongoose.connect("mongodb+srv://lauraahora4632025:hXqOPPuQ1INnrtkX@ahora4633.kcv
     console.error('❌ Error de conexión a MongoDB:', err.message);
   });
 
-// Eventos adicionales de conexión
+// Eventos adicionales de conexión--
 mongoose.connection.on('connected', () => {
   console.log('🟢 MongoDB conectado');
 });
