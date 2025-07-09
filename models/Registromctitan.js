@@ -28,7 +28,10 @@ const registroSchema = new mongoose.Schema({
   },
   fbclid: String,
   mensaje: String,
-  whatsappNumber: String,
+  whatsappNumber: {
+    type: String,
+    index: true // Agregamos índice para búsquedas más rápidas
+  },
   email: String,
   isVerified: {
     type: Boolean,
@@ -39,13 +42,26 @@ const registroSchema = new mongoose.Schema({
     enum: ['pendiente', 'verificado', 'fallido'],
     default: 'pendiente'
   },
+  verificationDetails: {
+    method: String,
+    timestamp: Date,
+    kommoLeadId: String,
+    kommoContactId: String
+  },
   verificationError: {
     tipo: String,
     mensaje: String,
     timestamp: Date
+  },
+  lastActivity: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
 });
+
+// Índice compuesto para búsqueda eficiente
+registroSchema.index({ whatsappNumber: 1, verificationStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Registromctitan', registroSchema); 
